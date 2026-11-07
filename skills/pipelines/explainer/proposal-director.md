@@ -270,6 +270,8 @@ Up to 20% of scenes in the final video may intentionally deviate from the playbo
 
 Surface the voice/TTS decision at proposal time:
 - What voice provider and voice ID will be used
+- For Brazilian Portuguese spoken on this machine, offer Kokoro (`kokoro_tts`, voice `pm_alex`) alongside Piper. Kokoro is the local Portuguese voice. Piper remains available for other local-only languages.
+- When the approved provider is Kokoro, the production plan names `tts_selector` with `preferred_tool: "kokoro_tts"`. Do not attach an ElevenLabs, OpenAI, or other `model_id` to that call.
 - Why this voice fits the concept's tone
 - Cost implications
 - Whether voice variation is appropriate for hero moments
@@ -321,7 +323,7 @@ For each stage in the pipeline manifest (`animated-explainer.yaml`), specify:
 1. **Which tools will be used** — specific provider names, not just selectors
 2. **Whether each tool is available** — from the preflight check
 3. **Estimated cost per tool** — from the tool's cost metadata
-4. **Why this provider** — explain the choice ("ElevenLabs for narration because voice quality is critical for this topic" or "Piper TTS because running local-only and free")
+4. **Why this provider** — explain the choice ("ElevenLabs for narration because voice quality is critical for this topic", "Kokoro TTS because the narration is Brazilian Portuguese and must stay on this machine", or "Piper TTS because running local-only and free")
 5. **Fallback if unavailable** — what happens if the primary tool is down
 
 **Tool selection rationale must be honest:**
@@ -337,7 +339,12 @@ For each meaningful choice, present the tradeoff:
 TRADEOFF: TTS Provider
 ├── Premium: ElevenLabs ($0.18-0.30) — natural voice, emotional delivery
 ├── Standard: OpenAI TTS ($0.05-0.15) — good quality, less expressive
-└── Free: Piper local ($0.00) — robotic but works offline
+└── Free local ($0.00):
+    ├── Kokoro-82M — Brazilian Portuguese narration, voice pm_alex, 24 kHz WAV.
+    │   Call tts_selector with preferred_tool "kokoro_tts". Do not send another
+    │   provider's model_id. output_path must end in .wav.
+    └── Piper — offline fallback for other languages. Call tts_selector with
+        preferred_tool "piper_tts" when that voice is the approved one.
 
 TRADEOFF: Visual Assets
 ├── Premium: AI video clips ($0.10-0.50/clip) — motion, dynamic

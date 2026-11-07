@@ -112,6 +112,8 @@ Use the playbook's typography for font choices.
 
 **Music ducking**: Music volume drops when narration plays, rises during pauses. Use playbook's `audio.ducking_threshold_db`.
 
+**Narration timeline:** `start_seconds` is the position of that section on the full timeline, copied from the script. Leave a gap when the next section starts later than this file's duration. Do not set `audio.narration.src` here. Compose builds one WAV from these segments, in `start_seconds` order, and writes `narration.src` itself. An existing `src` that already points at a real file is kept, so older edits that stored a single narration file stay valid.
+
 ### Step 5: Apply Pacing Rules
 
 Check the playbook's `motion.pacing_rules`:

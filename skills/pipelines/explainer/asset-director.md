@@ -95,8 +95,28 @@ For each script section:
    - ElevenLabs: `stability`, `similarity_boost`, `style`, `speed`, and `use_speaker_boost`
    - Azure: voice aliases (`andrew`, `brandon`, `ava`, `guy`, `jenny`) or any Azure short name, SSML `rate` (e.g. `"-4%"`), `pitch` (e.g. `"+1st"`), and `style` (e.g. `"narration-professional"`) — see the `azure-text-to-speech` skill
 7. Generate using `tts_selector` — it auto-routes to the best available TTS provider based on user preference and availability. Check the registry's `best_for` fields to understand each provider's strengths.
-8. Record the applied `voice_performance` metadata on each narration asset
-9. Verify the audio file exists and duration matches expected timing (±15%)
+   When the approved provider is Kokoro, the call is exactly:
+   ```python
+   tts_selector.execute({
+       "text": section_text,  # section text, not SSML provider_text
+       "preferred_tool": "kokoro_tts",
+       "voice": "pm_alex",
+       "speed": 1.0,
+       "output_path": "projects/<project>/assets/audio/<section-id>.wav",
+   })
+   ```
+   Kokoro rules:
+   - `output_path` must end in `.wav`. A `.mp3` path is rejected.
+   - Do not pass `model`, `model_id`, or `output_format` from another provider. Those fields remove Kokoro from the route.
+   - Do not send `delivery_cues.provider_text` when it contains SSML such as `<break>`. Kokoro speaks the string it receives. Use `section.text`.
+   - Pace becomes a numeric `speed` between 0.5 and 2.0 only. Kokoro ignores `instructions` and `style`.
+   - Record `voice_performance.provider_settings.language` as `pt-BR` on each Kokoro asset so compose transcribes in Portuguese.
+8. Record the applied `voice_performance` metadata on each narration asset. Copy the tool result, not the example path below:
+   - `path` = `result.data["output"]`
+   - `duration_seconds` = `result.data["audio_duration_seconds"]`
+   - `format` = `result.data["format"]` (`wav` for Kokoro)
+   - `source_tool` = `result.data["selected_tool"]` (`kokoro_tts` when Kokoro ran)
+9. Verify the audio file exists at that returned path and the duration matches expected timing (±15%)
 
 **Pronunciation guide**: If the script contains technical terms, jargon, or names with non-obvious pronunciation, include a pronunciation map in the TTS request.
 
@@ -146,7 +166,7 @@ Process asset tasks grouped by tool for efficiency:
 
 ### Step 6: Build Asset Manifest
 
-Assemble all generated assets into the manifest:
+Assemble all generated assets into the manifest. The narration entry below is the Kokoro shape. For any other approved TTS provider, keep that provider's `source_tool`, extension, and `voice_performance` — do not rewrite a finished MP3 into this WAV example.
 
 ```json
 {
@@ -156,11 +176,18 @@ Assemble all generated assets into the manifest:
       "id": "narration-s1",
       "type": "audio",
       "subtype": "narration",
-      "path": "assets/narration/s1.mp3",
-      "source_tool": "tts_selector",
+      "path": "assets/audio/s1.wav",
+      "source_tool": "kokoro_tts",
       "scene_id": "scene-1",
+      "format": "wav",
       "duration_seconds": 8.2,
-      "cost_usd": 0.003
+      "cost_usd": 0.0,
+      "voice_performance": {
+        "source_section_id": "s1",
+        "delivery_cues_applied": true,
+        "provider_text_used": false,
+        "provider_settings": {"voice": "pm_alex", "language": "pt-BR", "speed": 1.0}
+      }
     },
     {
       "id": "img-scene-3",

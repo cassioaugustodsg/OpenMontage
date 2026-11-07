@@ -55,48 +55,24 @@ Based on the edit decisions, pick the rendering approach:
 
 ### Step 2: Audio Acquisition (Narration, Music, Subtitles)
 
-Before rendering, present the user with audio options and get their preferences.
+Narration already exists. The assets stage wrote one file per script section, and the edit stage listed those `asset_id`s in `edit_decisions.audio.narration.segments`. Do not generate narration again in compose. Do not call `OpenAITTS`, `kokoro_tts`, or `tts_selector` from this stage. If a section file is missing, stop and return to the assets stage.
 
-**Present to the user:**
+`video_compose` consolidates those segments before it renders. It resolves each `asset_id` in the asset manifest, lays the files on the timeline with `audio_mixer` (`start_seconds` keeps the silence between sections), and writes `assets/audio/narration_bed.wav`. That absolute path becomes `audio.narration.src`. Remotion plays `narration.src`. FFmpeg uses the same file as `audio_path` when the caller did not pass a mix. HyperFrames keeps playing the original segments and does not need the bed.
 
-> **Audio setup for this video:**
->
-> **Narration:** I can generate TTS narration using OpenAI TTS (`gpt-4o-mini-tts` — $0.015/min, 6 voices, voice direction). Which voice and tone would you like? I'll propose a voice based on the video topic, or you can choose:
-> - `onyx` — deep, authoritative (documentaries, tech)
-> - `echo` — resonant, futuristic (product ads, sci-fi)
-> - `nova` — bright, energetic (upbeat, explainers)
-> - `fable` — warm, storytelling (narratives, education)
-> - `shimmer` — expressive, warm (organic, lifestyle)
-> - `alloy` — neutral, balanced (general purpose)
->
-> **Music:** I can automatically find royalty-free background music from Pixabay (no key needed). If you have a `FREESOUND_API_KEY`, I can also search Freesound as a backup.
->
-> **Subtitles:** I'll generate word-level subtitles using WhisperX transcription of the final narration, burned into the video via Remotion captions.
->
-> Want me to proceed with my recommendations, or adjust anything?
+Use the bed, or the section files, for transcription. Pass the narration language. Kokoro assets record `voice_performance.provider_settings.language` as `pt-BR`; the transcriber language for that voice is `pt`. For any other provider, use the language locked at proposal. Do not force `en` on a Portuguese narration.
 
-**After user confirms:**
+**Music:** Royalty-free background music can still be fetched here when the assets stage did not already supply a track. Pixabay needs no key. Freesound is a backup when `FREESOUND_API_KEY` is set.
 
-1. **Write narration script with duration budget** (see scene-director Step 4b):
-   - Calculate video duration from cuts
-   - Budget at 85-90% of video duration
-   - Use 2.0-2.5 words/sec for documentary, 2.5-3.0 for energetic
-   - Verify word count before generating TTS
+**Subtitles:** Word-level captions come from a transcription of the narration in its real language, then burn in through Remotion captions.
 
-2. **Generate TTS narration:**
+1. **Build the narration bed before render**, then probe it. `video_compose` calls the same helper and keeps this file when it already exists:
    ```python
-   from tools.audio.openai_tts import OpenAITTS
-   result = OpenAITTS().execute({
-       'text': narration_script,
-       'voice': '<user-chosen or agent-recommended>',
-       'instructions': '<voice direction matching video tone>',
-       'output_path': 'path/to/narration.mp3',
-   })
-   # CRITICAL: Check result.data['audio_duration_seconds'] vs video duration
-   # If narration exceeds video by >1s: shorten script and regenerate
+   from tools.audio.narration_bed import prepare_narration_bed
+   bed = prepare_narration_bed(edit_decisions, asset_manifest, project_dir="projects/<project>")
    ```
+   `bed["src"]` is the WAV. Compare `bed["duration_seconds"]` with the cut timeline. If the bed is longer than the video by more than 1 second, fix the edit timeline or the section files. Do not regenerate speech from this stage.
 
-3. **Download background music:**
+2. **Download background music** when the manifest has no music asset:
    ```python
    from tools.audio.pixabay_music import PixabayMusic
    result = PixabayMusic().execute({
@@ -107,23 +83,23 @@ Before rendering, present the user with audio options and get their preferences.
    })
    ```
 
-4. **Generate subtitles via WhisperX:**
+3. **Transcribe the narration in its own language:**
    ```python
    from tools.analysis.transcriber import Transcriber
    result = Transcriber().execute({
-       'input_path': 'path/to/narration.mp3',
+       'input_path': 'projects/<project>/assets/audio/narration_bed.wav',
        'model_size': 'base',
-       'language': 'en',
+       'language': 'pt',  # pt-BR Kokoro narration. Use the approved language, never a hardcoded en.
    })
    # Convert word_timestamps to Remotion caption format:
    # [{ "word": "Hello", "startMs": 0, "endMs": 340 }, ...]
    ```
 
-5. **Assemble composition JSON** with audio config:
+4. **Assemble composition JSON** with audio config:
    ```json
    {
      "audio": {
-       "narration": { "src": "path/to/narration.mp3", "volume": 1 },
+       "narration": { "src": "projects/<project>/assets/audio/narration_bed.wav", "volume": 1 },
        "music": { "src": "path/to/music.mp3", "volume": 0.1, "fadeInSeconds": 2, "fadeOutSeconds": 3 }
      },
      "captions": [ ... word-level captions from WhisperX ... ]
@@ -192,7 +168,7 @@ natively via `<Audio>` components. Pass audio sources in the composition props:
 ```json
 {
   "audio": {
-    "narration": { "src": "project/narration.mp3", "volume": 1.0 },
+    "narration": { "src": "projects/<project>/assets/audio/narration_bed.wav", "volume": 1.0 },
     "music": { "src": "project/music.mp3", "volume": 0.12, "fadeInSeconds": 1.5, "fadeOutSeconds": 2.5 }
   }
 }
@@ -219,9 +195,9 @@ Subtitles are mandatory for all explainer content. Generate them from the narrat
    ```python
    from tools.analysis.transcriber import Transcriber
    result = Transcriber().execute({
-       'input_path': 'projects/<project>/assets/audio/narration_full.mp3',
+       'input_path': 'projects/<project>/assets/audio/narration_bed.wav',
        'model_size': 'base',
-       'language': 'en',
+       'language': 'pt',  # approved narration language; pt for Kokoro pt-BR
        'output_dir': 'projects/<project>/assets/audio'
    })
    # result.data contains segments with word-level timestamps
@@ -333,7 +309,7 @@ from tools.analysis.transcriber import Transcriber
 result = Transcriber().execute({
     'input_path': 'path/to/rendered_video.mp4',
     'model_size': 'base',
-    'language': 'en',
+    'language': 'pt',  # same approved narration language as the bed
     'output_dir': 'path/to/review-frames',
 })
 # If result returns 0 words: audio is silent/missing — STOP and fix

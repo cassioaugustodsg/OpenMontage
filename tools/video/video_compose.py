@@ -1514,6 +1514,44 @@ class VideoCompose(BaseTool):
 
         return None
 
+    def _consolidate_narration_bed(
+        self,
+        inputs: dict[str, Any],
+        edit_decisions: dict[str, Any],
+        asset_manifest: dict[str, Any],
+        output_path: Path,
+        render_runtime: str,
+    ) -> dict[str, Any]:
+        """Lay section narration onto one WAV before a runtime that plays one file.
+
+        Segments stay in edit_decisions for HyperFrames. Remotion reads the
+        new narration.src. FFmpeg receives it as audio_path only when the
+        caller did not already supply a mix.
+        """
+        from tools.audio.narration_bed import prepare_narration_bed
+
+        project_dir = inputs.get("project_dir")
+        if project_dir:
+            root = Path(project_dir)
+        elif output_path.parent.name in {"renders", "assets"}:
+            root = output_path.parent.parent
+        else:
+            root = output_path.parent
+
+        bed = prepare_narration_bed(
+            edit_decisions,
+            asset_manifest,
+            project_dir=root,
+        )
+        if (
+            not bed.get("error")
+            and render_runtime == "ffmpeg"
+            and not inputs.get("audio_path")
+            and bed.get("src")
+        ):
+            inputs["audio_path"] = bed["src"]
+        return bed
+
     def _render(self, inputs: dict[str, Any]) -> ToolResult:
         """High-level render: assemble edit decisions + asset manifest into final video.
 
@@ -1633,6 +1671,16 @@ class VideoCompose(BaseTool):
         validation_block = self._pre_compose_validation(edit_decisions, resolved_cuts, scene_plan)
         if validation_block is not None:
             return validation_block
+
+        narration_bed = self._consolidate_narration_bed(
+            inputs, edit_decisions, asset_manifest, output_path, render_runtime
+        )
+        bed_error = narration_bed.get("error")
+        needs_single_file = render_runtime == "remotion" or (
+            render_runtime == "ffmpeg" and not inputs.get("audio_path")
+        )
+        if bed_error and needs_single_file:
+            return ToolResult(success=False, error=bed_error)
 
         # Also accept profile as "output_profile" (skill convention) or "profile"
         profile = inputs.get("profile") or inputs.get("output_profile")
